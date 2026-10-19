@@ -1,0 +1,6 @@
+{
+  "name": "THE UMPIRE - 球審ストライクゾーン判定",
+  "description": "リアルな3D球場視点でピッチャーの投球を見極める！球審（主審）になってストライク・ボールを正確に判定する本格野球アンパイアシミュレーターゲーム。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
