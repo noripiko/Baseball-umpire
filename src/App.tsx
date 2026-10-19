@@ -89,7 +89,7 @@ export default function App() {
         sounds.playGloveCatch(150);
         handleBallCaught();
       },
-      onWindupStarted: () => {
+      onBallReleased: () => {
         sounds.playPitchWhoosh();
       },
     });

@@ -8,6 +8,7 @@ import {
   createCatcher,
   createHomePlate,
   createPitcher,
+  PitcherRig,
   createStadiumEnvironment,
   createStrikeZoneBox,
 } from './proceduralModels';
@@ -19,6 +20,7 @@ const _vec3 = new THREE.Vector3();
 export interface SceneCallbacks {
   onBallCaught: () => void;
   onWindupStarted?: () => void;
+  onBallReleased?: () => void;
 }
 
 export class UmpireSceneManager {
@@ -30,9 +32,7 @@ export class UmpireSceneManager {
   private clock = new THREE.Clock();
 
   // Scene entities
-  private pitcherGroup!: THREE.Group;
-  private throwingArm!: THREE.Group;
-  private leadLeg!: THREE.Mesh;
+  private pitcherRig!: PitcherRig;
   private catcherGroup!: THREE.Group;
   private catcherMitt!: THREE.Mesh;
   private batterData!: BatterModel;
@@ -51,7 +51,7 @@ export class UmpireSceneManager {
   private isPitchActive = false;
   private pitchPhase: 'IDLE' | 'WINDUP' | 'FLIGHT' | 'CAUGHT' = 'IDLE';
   private pitchTime = 0;
-  private windupDuration = 1.1; // seconds
+  private windupDuration = 1.25; // Authentic pro baseball windup timing (seconds)
   private flightDuration = 0.42; // seconds (depends on speed)
   private currentTrajectory: Array<{ x: number; y: number; z: number }> = [];
   private currentResult: PitchResult | null = null;
@@ -131,12 +131,9 @@ export class UmpireSceneManager {
     const battersBoxes = createBattersBoxes();
     this.scene.add(battersBoxes);
 
-    // 7. Pitcher
-    const pitcherData = createPitcher();
-    this.pitcherGroup = pitcherData.group;
-    this.throwingArm = pitcherData.throwingArm;
-    this.leadLeg = pitcherData.leadLeg;
-    this.scene.add(this.pitcherGroup);
+    // 7. Pitcher (Articulated Pro Baseball Rig)
+    this.pitcherRig = createPitcher();
+    this.scene.add(this.pitcherRig.group);
 
     // 8. Catcher
     const catcherData = createCatcher();
@@ -261,6 +258,12 @@ export class UmpireSceneManager {
 
   public setTitleOrbitMode(enabled: boolean) {
     this.isTitleOrbiting = enabled;
+    if (enabled) {
+      this.isPitchActive = false;
+      this.pitchPhase = 'IDLE';
+      this.pitcherRig.setPose('IDLE', 0, 0);
+      this.baseballMesh.visible = false;
+    }
   }
 
   public setZoneGuideVisible(visible: boolean) {
@@ -285,9 +288,10 @@ export class UmpireSceneManager {
     this.pitchTime = 0;
     this.isTitleOrbiting = false;
 
-    // Place ball in pitcher's hand
+    // Reset pitcher pose into beginning of windup and glue ball to hand socket
+    this.pitcherRig.setPose('WINDUP', 0, 0);
+    this.pitcherRig.getBallSocketWorldPos(this.baseballMesh.position);
     this.baseballMesh.visible = true;
-    this.baseballMesh.position.set(0.2, 1.4, 18.44);
 
     // Reset mitt position
     this.catcherMitt.position.copy(this.originalMittPos);
@@ -413,34 +417,40 @@ export class UmpireSceneManager {
       this.pitchTime += dt;
 
       if (this.pitchPhase === 'WINDUP') {
-        const windupProgress = this.pitchTime / this.windupDuration; // 0 to 1
+        const windupProgress = Math.min(1.0, this.pitchTime / this.windupDuration); // 0 to 1
 
-        if (windupProgress < 0.6) {
-          // Leg kick up & arm drawback
-          const legT = windupProgress / 0.6;
-          this.leadLeg.position.y = 0.42 + Math.sin(legT * Math.PI) * 0.4;
-          this.leadLeg.rotation.x = Math.sin(legT * Math.PI) * 0.7;
-          this.throwingArm.rotation.x = -legT * 1.2;
-          this.throwingArm.rotation.z = -legT * 0.8;
-          this.baseballMesh.position.set(0.25, 1.2 + legT * 0.4, 18.44 - legT * 0.2);
-        } else {
-          // Stride forward & whip arm
-          const whipT = (windupProgress - 0.6) / 0.4;
-          this.leadLeg.position.set(-0.15, 0.42, 0.2 + whipT * 0.6);
-          this.leadLeg.rotation.x = 0;
-          this.throwingArm.rotation.x = -1.2 + whipT * 2.5;
-          this.baseballMesh.position.set(0.35 + whipT * 0.07, 1.8 + Math.sin(whipT * Math.PI) * 0.2, 17.5 - whipT * 1.0);
-        }
+        // Drive the fully articulated pitching kinetic chain
+        this.pitcherRig.setPose('WINDUP', windupProgress, this.pitchTime);
+
+        // Keep baseball physically locked in the pitcher's right hand socket
+        this.pitcherRig.getBallSocketWorldPos(this.baseballMesh.position);
+        this.baseballMesh.visible = true;
 
         if (windupProgress >= 1.0) {
-          // Ball released!
+          // Ball released at apex into flight toward home plate!
           this.pitchPhase = 'FLIGHT';
           this.pitchTime = 0;
+
+          // Connect release position seamlessly to the start of trajectory
+          if (this.currentTrajectory.length > 0) {
+            this.currentTrajectory[0] = {
+              x: this.baseballMesh.position.x,
+              y: this.baseballMesh.position.y,
+              z: this.baseballMesh.position.z,
+            };
+          }
+
+          if (this.callbacks.onBallReleased) {
+            this.callbacks.onBallReleased();
+          }
         }
       } else if (this.pitchPhase === 'FLIGHT') {
         const flightProgress = Math.min(1.0, this.pitchTime / this.flightDuration); // 0 to 1
 
-        // Interpolate along trajectory
+        // Pitcher executes natural deceleration, chest bow & high leg kick follow-through
+        this.pitcherRig.setPose('FLIGHT', flightProgress, this.pitchTime);
+
+        // Interpolate baseball along calculated aerodynamic trajectory
         if (this.currentTrajectory.length > 0) {
           const indexFloat = flightProgress * (this.currentTrajectory.length - 1);
           const idx = Math.floor(indexFloat);
@@ -492,6 +502,20 @@ export class UmpireSceneManager {
           // Trigger catch callback & camera thump
           this.triggerCameraShake(0.045);
           this.callbacks.onBallCaught();
+        }
+      }
+    } else {
+      // Mound idle / ready breathing animation when not actively throwing
+      if (this.pitchPhase === 'IDLE') {
+        this.pitcherRig.setPose('IDLE', 0, this.clock.elapsedTime);
+        this.baseballMesh.visible = false;
+      } else if (this.pitchPhase === 'CAUGHT') {
+        // Hold follow-through momentarily, then relax back into set stance
+        this.pitchTime += dt;
+        if (this.pitchTime > 1.2) {
+          this.pitcherRig.setPose('IDLE', 0, this.clock.elapsedTime);
+        } else {
+          this.pitcherRig.setPose('FOLLOW_THROUGH', 1.0, this.pitchTime);
         }
       }
     }

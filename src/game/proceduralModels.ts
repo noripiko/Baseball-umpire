@@ -664,104 +664,594 @@ export function createBatter(stance: BatterStance = 'RIGHT'): BatterModel {
   };
 }
 
-/**
- * Composite Procedural Pitcher on the Mound (8+ parts with animated windup arms)
- */
-export function createPitcher(): {
+export interface PitcherRig {
   group: THREE.Group;
-  throwingArm: THREE.Group;
-  leadLeg: THREE.Mesh;
-} {
+  bodyRoot: THREE.Group;
+  pelvis: THREE.Group;
+  torso: THREE.Group;
+  headGroup: THREE.Group;
+
+  // Throwing arm (Right arm)
+  rightShoulder: THREE.Group;
+  rightUpperArm: THREE.Group;
+  rightElbow: THREE.Group;
+  rightForearm: THREE.Group;
+  rightHand: THREE.Group;
+  ballSocket: THREE.Group;
+
+  // Glove arm (Left arm)
+  leftShoulder: THREE.Group;
+  leftUpperArm: THREE.Group;
+  leftElbow: THREE.Group;
+  leftForearm: THREE.Group;
+  gloveGroup: THREE.Group;
+
+  // Lead leg (Left leg - strides toward home plate)
+  leftHip: THREE.Group;
+  leftThigh: THREE.Group;
+  leftKnee: THREE.Group;
+  leftShin: THREE.Group;
+  leftFoot: THREE.Group;
+
+  // Pivot leg (Right leg - pushes off rubber)
+  rightHip: THREE.Group;
+  rightThigh: THREE.Group;
+  rightKnee: THREE.Group;
+  rightShin: THREE.Group;
+  rightFoot: THREE.Group;
+
+  setPose: (phase: 'IDLE' | 'WINDUP' | 'FLIGHT' | 'FOLLOW_THROUGH', progress: number, time?: number) => void;
+  getBallSocketWorldPos: (targetVec: THREE.Vector3) => THREE.Vector3;
+}
+
+/**
+ * Creates custom Pitcher Ace Jersey Texture (No. 18 with navy pinstripes)
+ */
+export function createPitcherJerseyTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d')!;
+
+  // Clean uniform fabric base
+  ctx.fillStyle = '#f8f9fa';
+  ctx.fillRect(0, 0, 256, 256);
+
+  // Navy pinstripes
+  ctx.strokeStyle = '#1d3557';
+  ctx.lineWidth = 2;
+  for (let x = 16; x < 256; x += 32) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, 256);
+    ctx.stroke();
+  }
+
+  // Ace Pitcher Number 18 on back
+  ctx.fillStyle = '#e63946';
+  ctx.strokeStyle = '#1d3557';
+  ctx.lineWidth = 4;
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 88px system-ui, sans-serif';
+  ctx.strokeText('18', 128, 140);
+  ctx.fillText('18', 128, 140);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+/**
+ * Highly Articulated Pro Baseball Pitcher Rig on the Mound
+ * Features a 100% interconnected anatomical kinematic chain:
+ * Pelvis -> Spine/Torso -> Shoulders -> Elbows -> Wrists -> Fingers & Ball Socket
+ * Pelvis -> Hips -> Thighs -> Knees -> Shins -> Cleats
+ */
+export function createPitcher(): PitcherRig {
   const group = new THREE.Group();
 
+  // Root placed at pitcher rubber (18.44m away from home plate, y = 0.26m on mound)
+  group.position.set(0, 0.26, 18.44);
+
+  // Materials
+  const jerseyTex = createPitcherJerseyTexture();
   const jerseyMat = new THREE.MeshStandardMaterial({
+    map: jerseyTex,
+    roughness: 0.65,
+    metalness: 0.05,
+  });
+  const navyTrimMat = new THREE.MeshStandardMaterial({
     color: 0x1d3557, // Deep royal navy
-    roughness: 0.6,
+    roughness: 0.55,
+  });
+  const compressionSleeveMat = new THREE.MeshStandardMaterial({
+    color: 0x14213d, // Dark compression sleeve on right arm
+    roughness: 0.45,
   });
   const pantsMat = new THREE.MeshStandardMaterial({
     color: 0xf8f9fa, // Clean white pants
     roughness: 0.7,
   });
+  const stripeMat = new THREE.MeshStandardMaterial({
+    color: 0xe63946, // Red uniform piping
+    roughness: 0.6,
+  });
   const capMat = new THREE.MeshStandardMaterial({
-    color: 0x1d3557,
-    roughness: 0.4,
+    color: 0x1d3557, // Navy baseball cap
+    roughness: 0.35,
+    metalness: 0.2,
   });
   const gloveMat = new THREE.MeshStandardMaterial({
-    color: 0x78350f, // Brown glove
-    roughness: 0.5,
+    color: 0x78350f, // Rich tan/brown leather glove
+    roughness: 0.4,
+    metalness: 0.08,
   });
   const skinMat = new THREE.MeshStandardMaterial({
     color: 0xddb892,
-    roughness: 0.7,
+    roughness: 0.75,
+  });
+  const beltMat = new THREE.MeshStandardMaterial({
+    color: 0x1c1917,
+    roughness: 0.5,
+  });
+  const buckleMat = new THREE.MeshStandardMaterial({
+    color: 0xd4af37,
+    metalness: 0.85,
+    roughness: 0.2,
+  });
+  const cleatMat = new THREE.MeshStandardMaterial({
+    color: 0x111111,
+    roughness: 0.4,
+  });
+  const studMat = new THREE.MeshStandardMaterial({
+    color: 0xcccccc,
+    metalness: 0.9,
+    roughness: 0.2,
   });
 
-  // Mound elevation (mound is 0.25m high at center, 18.44m away)
-  const moundDist = 18.44;
+  // Body Root (translates forward along -Z toward home plate during stride)
+  const bodyRoot = new THREE.Group();
+  group.add(bodyRoot);
 
-  // 1. Pivot Leg (Back leg on the rubber)
-  const backLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.07, 0.85, 8), pantsMat);
-  backLeg.position.set(0.05, 0.42, 0);
-  group.add(backLeg);
+  // Pelvis / Hips (Root of torso and leg kinematics, standard height 0.88m)
+  const pelvis = new THREE.Group();
+  pelvis.position.set(0, 0.88, 0);
+  bodyRoot.add(pelvis);
 
-  // 2. Lead Leg (Lifted high in windup)
-  const leadLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.07, 0.85, 8), pantsMat);
-  leadLeg.position.set(-0.15, 0.42, 0.2);
-  group.add(leadLeg);
+  // Waist & Belt meshes
+  const waistMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.17, 0.12, 12), pantsMat);
+  waistMesh.position.y = 0.04;
+  const beltMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.182, 0.182, 0.045, 12), beltMat);
+  beltMesh.position.y = 0.07;
+  const buckleMesh = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.035, 0.02), buckleMat);
+  buckleMesh.position.set(0, 0.07, -0.18);
+  pelvis.add(waistMesh, beltMesh, buckleMesh);
 
-  // 3. Torso
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.6, 0.28), jerseyMat);
-  torso.position.set(0, 1.15, 0);
-  group.add(torso);
+  // ===================== LEGS =====================
+  // Helper to construct articulated leg (Hip -> Thigh -> Knee -> Shin -> Foot)
+  const createArticulatedLeg = (isLeadLeg: boolean) => {
+    const hip = new THREE.Group();
+    hip.position.set(isLeadLeg ? -0.11 : 0.11, 0, 0);
 
-  // 4. Head & Pitcher Cap
+    // Thigh (length 0.42m)
+    const thighGroup = new THREE.Group();
+    const thighMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.065, 0.42, 10), pantsMat);
+    thighMesh.position.y = -0.21;
+    thighMesh.castShadow = true;
+
+    // Red piping stripe down outer side of thigh
+    const thighStripe = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.42, 0.025), stripeMat);
+    thighStripe.position.set(isLeadLeg ? -0.075 : 0.075, -0.21, 0);
+    thighGroup.add(thighMesh, thighStripe);
+    hip.add(thighGroup);
+
+    // Knee joint at -0.42m
+    const knee = new THREE.Group();
+    knee.position.set(0, -0.42, 0);
+    const kneeCap = new THREE.Mesh(new THREE.SphereGeometry(0.072, 8, 8), pantsMat);
+    knee.add(kneeCap);
+
+    // Shin (length 0.40m)
+    const shinGroup = new THREE.Group();
+    const shinMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.052, 0.40, 10), pantsMat);
+    shinMesh.position.y = -0.20;
+    shinMesh.castShadow = true;
+
+    const shinStripe = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.40, 0.022), stripeMat);
+    shinStripe.position.set(isLeadLeg ? -0.06 : 0.06, -0.20, 0);
+    shinGroup.add(shinMesh, shinStripe);
+    knee.add(shinGroup);
+
+    // Foot / Cleat at -0.40m
+    const foot = new THREE.Group();
+    foot.position.set(0, -0.40, 0);
+
+    // Cleat body pointing toward home plate (-Z)
+    const cleatBody = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.07, 0.25), cleatMat);
+    cleatBody.position.set(0, 0.035, -0.04);
+    cleatBody.castShadow = true;
+
+    // Cleat metallic spikes
+    const soleSpikes = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.015, 0.22), studMat);
+    soleSpikes.position.set(0, 0.005, -0.04);
+    foot.add(cleatBody, soleSpikes);
+    knee.add(foot);
+
+    hip.add(knee);
+
+    return { hip, thigh: thighGroup, knee, shin: shinGroup, foot };
+  };
+
+  const leftLeg = createArticulatedLeg(true); // Lead leg
+  const rightLeg = createArticulatedLeg(false); // Pivot leg
+  pelvis.add(leftLeg.hip, rightLeg.hip);
+
+  // ===================== TORSO & HEAD =====================
+  const torso = new THREE.Group();
+  torso.position.set(0, 0.10, 0);
+  pelvis.add(torso);
+
+  // Torso Chest & Back
+  const torsoMesh = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.52, 0.25), jerseyMat);
+  torsoMesh.position.set(0, 0.26, 0);
+  torsoMesh.castShadow = true;
+  torso.add(torsoMesh);
+
+  // Jersey center buttons & collar trim
+  const collarTrim = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.13, 0.04, 10), navyTrimMat);
+  collarTrim.position.set(0, 0.51, 0);
+  torso.add(collarTrim);
+
+  // Neck & Head
   const headGroup = new THREE.Group();
-  headGroup.position.set(0, 1.6, 0);
+  headGroup.position.set(0, 0.54, 0);
 
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 10), skinMat);
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.065, 0.10, 8), skinMat);
+  neck.position.y = 0.04;
+  headGroup.add(neck);
+
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 12), skinMat);
+  head.position.y = 0.14;
   headGroup.add(head);
 
-  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 10, 0, Math.PI * 2, 0, Math.PI / 2), capMat);
-  cap.position.set(0, 0.03, 0);
-  headGroup.add(cap);
+  // Pitcher Cap
+  const capDome = new THREE.Mesh(new THREE.SphereGeometry(0.135, 12, 12, 0, Math.PI * 2, 0, Math.PI / 2), capMat);
+  capDome.position.y = 0.17;
+  headGroup.add(capDome);
 
-  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.02, 0.12), capMat);
-  visor.position.set(0, 0.04, -0.12);
+  const capButton = new THREE.Mesh(new THREE.SphereGeometry(0.015, 6, 6), navyTrimMat);
+  capButton.position.set(0, 0.305, 0);
+  headGroup.add(capButton);
+
+  // Curved Cap Visor extending forward (-Z toward home plate)
+  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.018, 0.13), capMat);
+  visor.position.set(0, 0.19, -0.12);
   visor.rotation.x = 0.15;
   headGroup.add(visor);
 
-  group.add(headGroup);
+  torso.add(headGroup);
 
-  // 5. Glove Arm (Left arm)
-  const gloveArm = new THREE.Group();
-  gloveArm.position.set(-0.25, 1.35, 0);
-  const leftForearm = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.35, 8), jerseyMat);
-  leftForearm.position.set(-0.08, -0.15, -0.1);
-  leftForearm.rotation.z = -0.5;
-  const glove = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.1), gloveMat);
-  glove.position.set(-0.12, -0.32, -0.12);
-  gloveArm.add(leftForearm, glove);
-  group.add(gloveArm);
+  // ===================== GLOVE ARM (LEFT) =====================
+  const leftShoulder = new THREE.Group();
+  leftShoulder.position.set(-0.24, 0.44, 0);
 
-  // 6. Throwing Arm (Right arm - pivots dynamically for windup & release!)
-  const throwingArm = new THREE.Group();
-  throwingArm.position.set(0.25, 1.35, 0);
+  const leftShoulderCap = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), navyTrimMat);
+  leftShoulder.add(leftShoulderCap);
 
-  const upperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.045, 0.32, 8), jerseyMat);
-  upperArm.position.set(0.05, 0.1, 0);
-  upperArm.rotation.z = -0.4;
+  const leftUpperArm = new THREE.Group();
+  const leftUpperArmMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.046, 0.28, 8), jerseyMat);
+  leftUpperArmMesh.position.y = -0.14;
+  leftUpperArm.add(leftUpperArmMesh);
+  leftShoulder.add(leftUpperArm);
 
-  const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.04, 0.32, 8), skinMat);
-  forearm.position.set(0.12, 0.32, 0);
-  forearm.rotation.z = 0.3;
+  const leftElbow = new THREE.Group();
+  leftElbow.position.set(0, -0.28, 0);
 
-  throwingArm.add(upperArm, forearm);
-  group.add(throwingArm);
+  const leftForearm = new THREE.Group();
+  const leftForearmMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.046, 0.042, 0.26, 8), skinMat);
+  leftForearmMesh.position.y = -0.13;
+  leftForearm.add(leftForearmMesh);
+  leftElbow.add(leftForearm);
 
-  // Position pitcher on mound
-  group.position.set(0, 0.25, moundDist);
-  group.rotation.y = Math.PI; // Looking toward home plate!
+  // Detailed 3D Leather Fielding Glove
+  const gloveGroup = new THREE.Group();
+  gloveGroup.position.set(0, -0.26, 0);
 
-  return { group, throwingArm, leadLeg };
+  const glovePalm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.16, 0.11), gloveMat);
+  glovePalm.position.set(0, -0.02, 0);
+  const gloveWeb = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.12, 0.08), gloveMat);
+  gloveWeb.position.set(0.08, 0.02, 0);
+  const glovePocket = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), new THREE.MeshStandardMaterial({ color: 0x5a2d0c, roughness: 0.6 }));
+  glovePocket.position.set(0.03, -0.01, -0.03);
+  glovePocket.scale.set(1.0, 1.2, 0.6);
+
+  gloveGroup.add(glovePalm, gloveWeb, glovePocket);
+  leftElbow.add(gloveGroup);
+  torso.add(leftShoulder);
+
+  // ===================== THROWING ARM (RIGHT) =====================
+  const rightShoulder = new THREE.Group();
+  rightShoulder.position.set(0.24, 0.44, 0);
+
+  const rightShoulderCap = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), navyTrimMat);
+  rightShoulder.add(rightShoulderCap);
+
+  const rightUpperArm = new THREE.Group();
+  // Compression sleeve on pitching bicep
+  const rightUpperArmMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.046, 0.28, 8), compressionSleeveMat);
+  rightUpperArmMesh.position.y = -0.14;
+  rightUpperArm.add(rightUpperArmMesh);
+  rightShoulder.add(rightUpperArm);
+
+  const rightElbow = new THREE.Group();
+  rightElbow.position.set(0, -0.28, 0);
+
+  const rightForearm = new THREE.Group();
+  const rightForearmMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.046, 0.042, 0.26, 8), skinMat);
+  rightForearmMesh.position.y = -0.13;
+  rightForearm.add(rightForearmMesh);
+  rightElbow.add(rightForearm);
+
+  // Pitcher Hand & Grip Socket
+  const rightHand = new THREE.Group();
+  rightHand.position.set(0, -0.26, 0);
+
+  const handMesh = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.09, 0.06), skinMat);
+  handMesh.position.set(0, -0.03, 0);
+  // Fingers curling around baseball
+  const fingers = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.04, 0.07), skinMat);
+  fingers.position.set(0, -0.06, -0.02);
+  rightHand.add(handMesh, fingers);
+
+  // Ball Socket: the exact physical socket where baseball is held
+  const ballSocket = new THREE.Group();
+  ballSocket.position.set(0, -0.05, -0.04);
+  rightHand.add(ballSocket);
+
+  rightElbow.add(rightHand);
+  torso.add(rightShoulder);
+
+  // ===================== KINEMATIC POSE SOLVER =====================
+  /**
+   * Evaluates the authentic professional pitching kinetic chain:
+   * Leg kick & coiling -> Stride & separation -> Scapular load/layback -> Arm whip & release -> Follow-through
+   */
+  const setPose = (phase: 'IDLE' | 'WINDUP' | 'FLIGHT' | 'FOLLOW_THROUGH', progress: number, time: number = 0) => {
+    if (phase === 'IDLE') {
+      // 1. Authentic MLB/NPB Set Stance on the Rubber
+      bodyRoot.position.set(0, 0, 0);
+      pelvis.position.set(0, 0.88, 0);
+
+      // Turned sideways to home plate (~76°)
+      pelvis.rotation.set(0, 1.32, 0);
+      torso.rotation.set(0, 0.06, 0);
+      torso.position.y = 0.10 + Math.sin(time * 2.4) * 0.003; // breathing
+
+      // Head peers straight down the slot at the catcher
+      headGroup.rotation.set(0, -1.38, 0);
+
+      // Hands joined at chest in the set position, ball inside glove
+      leftShoulder.rotation.set(-0.35, -0.22, 0.48);
+      leftElbow.rotation.set(1.42, 0.18, 0);
+
+      rightShoulder.rotation.set(-0.38, 0.20, -0.48);
+      rightElbow.rotation.set(1.45, -0.16, 0);
+      rightHand.rotation.set(0, 0, 0);
+
+      // Lead leg (Left): relaxed stance in front of rubber
+      leftLeg.hip.rotation.set(-0.12, 0, 0.05);
+      leftLeg.knee.rotation.set(0.18, 0, 0);
+      leftLeg.foot.rotation.set(0, 0, 0);
+
+      // Pivot leg (Right): firmly on the rubber
+      rightLeg.hip.rotation.set(0.05, 0, -0.05);
+      rightLeg.knee.rotation.set(0.10, 0, 0);
+      rightLeg.foot.rotation.set(0, 0, 0);
+      return;
+    }
+
+    if (phase === 'WINDUP') {
+      const p = Math.max(0, Math.min(1.0, progress));
+
+      if (p < 0.36) {
+        // ----------------------------------------------------
+        // Stage 1: High Leg Kick & Weight Coil (Balance Point)
+        // ----------------------------------------------------
+        const t = p / 0.36;
+        const ease = 0.5 - 0.5 * Math.cos(t * Math.PI);
+
+        bodyRoot.position.set(0, 0, 0);
+        pelvis.position.set(0, 0.88 + 0.03 * ease, 0);
+
+        // Pelvis coils back slightly
+        pelvis.rotation.set(0, 1.32 + 0.18 * ease, 0);
+        torso.rotation.set(0, 0.06 + 0.10 * ease, 0.04 * ease);
+        headGroup.rotation.set(0, -(pelvis.rotation.y + torso.rotation.y), 0);
+
+        // Lead leg (Left) lifts high into chest, knee bent sharply
+        leftLeg.hip.rotation.set(-1.68 * ease, 0, -0.22 * ease);
+        leftLeg.knee.rotation.set(1.85 * ease, 0, 0);
+        leftLeg.foot.rotation.set(0.25 * ease, 0, 0);
+
+        // Pivot leg (Right) sits slightly into glute for power
+        rightLeg.hip.rotation.set(-0.10 * ease, 0, -0.04);
+        rightLeg.knee.rotation.set(0.24 * ease, 0, 0);
+        rightLeg.foot.rotation.set(0, 0, 0);
+
+        // Hands stay together at chest, raising slightly with knee
+        leftShoulder.rotation.set(-0.45 * ease, -0.15, 0.55);
+        leftElbow.rotation.set(1.50, 0.15, 0);
+
+        rightShoulder.rotation.set(-0.45 * ease, 0.15, -0.55);
+        rightElbow.rotation.set(1.50, -0.15, 0);
+        rightHand.rotation.set(0, 0, 0);
+      } else if (p < 0.70) {
+        // ----------------------------------------------------
+        // Stage 2: Stride Forward & Hand Separation (The Break)
+        // ----------------------------------------------------
+        const t = (p - 0.36) / 0.34;
+        const ease = Math.pow(t, 1.25);
+
+        // Dynamic forward stride toward home plate (along -Z)
+        bodyRoot.position.set(0, 0, -1.55 * ease);
+        pelvis.position.set(0, 0.88 - 0.14 * Math.sin(t * Math.PI * 0.82), 0);
+
+        // Hips begin to uncoil toward home plate
+        pelvis.rotation.set(0, 1.50 * (1 - ease) + 0.28 * ease, 0);
+
+        // Torso keeps shoulders closed longer (Hip-Shoulder Separation!)
+        torso.rotation.set(0, 0.16 * (1 - ease) + 0.45 * Math.sin(t * Math.PI), 0.12 * ease);
+        headGroup.rotation.set(0, -(pelvis.rotation.y + torso.rotation.y), 0);
+
+        // Lead leg (Left) reaches forward and lands
+        leftLeg.hip.rotation.set(-1.68 * (1 - t) - 0.42 * t, 0, -0.22 * (1 - t));
+        leftLeg.knee.rotation.set(1.85 * (1 - t) + 0.55 * t, 0, 0);
+        leftLeg.foot.rotation.set(0.25 * (1 - t), 0, 0);
+
+        // Pivot leg (Right) drives off the rubber
+        rightLeg.hip.rotation.set(0.55 * ease, 0, -0.04);
+        rightLeg.knee.rotation.set(0.24 * (1 - t) + 0.08 * t, 0, 0);
+
+        // Hands break apart:
+        // Glove arm reaches forward toward target for front-side stability
+        leftShoulder.rotation.set(-0.85 * ease, -0.42 * ease, 0.35);
+        leftElbow.rotation.set(0.65 * (1 - ease), 0, 0);
+
+        // Throwing arm swings down, back, and cocks up into 90° scapular pinch
+        rightShoulder.rotation.set(0.75 * ease, -0.65 * ease, -1.45 * ease);
+        rightElbow.rotation.set(1.57 * ease, -0.60 * ease, 0);
+        rightHand.rotation.set(0, 0, 0);
+      } else if (p < 0.86) {
+        // ----------------------------------------------------
+        // Stage 3: Maximum External Rotation (Layback)
+        // ----------------------------------------------------
+        const t = (p - 0.70) / 0.16;
+        const ease = Math.pow(t, 1.2);
+
+        bodyRoot.position.set(0, 0, -1.55 - 0.15 * ease);
+        pelvis.position.set(0, 0.88 - 0.14, 0);
+
+        // Pelvis opens fully toward home plate
+        pelvis.rotation.set(0, 0.28 * (1 - ease), 0);
+
+        // Torso drives forward with lateral tilt for 3/4 release slot
+        torso.rotation.set(0.40 * ease, -0.15 * ease, 0.28 * ease);
+        headGroup.rotation.set(0, -(pelvis.rotation.y + torso.rotation.y), 0);
+
+        // Lead leg is firmly braced
+        leftLeg.hip.rotation.set(-0.42, 0, 0);
+        leftLeg.knee.rotation.set(0.55 + 0.10 * ease, 0, 0);
+
+        // Glove arm tucks firmly into left ribcage
+        leftShoulder.rotation.set(0.35 * ease, 0.45 * ease, 0.25 * ease);
+        leftElbow.rotation.set(1.85 * ease, 0, 0);
+
+        // Throwing arm experiences extreme layback (forearm horizontal pointing back)
+        rightShoulder.rotation.set(0.75 - 0.65 * ease, -0.65, -1.45);
+        rightElbow.rotation.set(1.57, -0.60 - 1.05 * ease, 0);
+        rightHand.rotation.set(-0.25 * ease, 0, 0);
+      } else {
+        // ----------------------------------------------------
+        // Stage 4: Arm Acceleration & Release Apex
+        // ----------------------------------------------------
+        const t = (p - 0.86) / 0.14;
+        const ease = Math.pow(t, 1.7);
+
+        bodyRoot.position.set(0, 0, -1.70);
+        pelvis.position.set(0, 0.74, 0);
+        pelvis.rotation.set(0, 0, 0);
+
+        // Trunk forward flexion over braced lead knee
+        torso.rotation.set(0.40 + 0.45 * ease, -0.15 - 0.10 * ease, 0.28);
+        headGroup.rotation.set(0, 0, 0);
+
+        leftLeg.hip.rotation.set(-0.42, 0, 0);
+        leftLeg.knee.rotation.set(0.65, 0, 0);
+
+        // Throwing arm whips violently forward overhead:
+        // Forearm snaps forward, elbow extends rapidly toward release apex
+        rightShoulder.rotation.set(0.10 - 1.05 * ease, -0.65 + 0.45 * ease, -1.45 + 0.35 * ease);
+        rightElbow.rotation.set(1.57 * (1 - ease) + 0.22 * ease, -1.65 * (1 - ease) + 0.45 * ease, 0);
+        rightHand.rotation.set(-0.25 - 0.35 * ease, 0, 0);
+      }
+      return;
+    }
+
+    if (phase === 'FLIGHT' || phase === 'FOLLOW_THROUGH') {
+      // ----------------------------------------------------
+      // Follow-Through: Deceleration & Balanced Landing
+      // ----------------------------------------------------
+      const t = Math.max(0, Math.min(1.0, progress));
+      const ease = 1 - Math.pow(1 - t, 2.0);
+
+      bodyRoot.position.set(0, 0, -1.70);
+      pelvis.position.set(0, 0.74, 0);
+      pelvis.rotation.set(0, -0.15 * ease, 0);
+
+      // Deep torso bow over front knee
+      torso.rotation.set(0.85 + 0.22 * ease, -0.25 - 0.12 * ease, 0.28 + 0.10 * ease);
+      headGroup.rotation.set(0, 0.15 * ease, 0);
+
+      // Throwing arm decelerates smoothly across the body toward left hip
+      rightShoulder.rotation.set(-0.95 - 0.30 * ease, -0.20 + 0.40 * ease, -1.10 + 1.65 * ease);
+      rightElbow.rotation.set(0.22 + 1.15 * ease, 0.45 - 0.65 * ease, 0);
+      rightHand.rotation.set(-0.6, 0, 0);
+
+      // Glove arm tucked in tight
+      leftShoulder.rotation.set(0.40, 0.50, 0.30);
+      leftElbow.rotation.set(1.85, 0, 0);
+
+      // Lead leg absorbs landing weight
+      leftLeg.hip.rotation.set(-0.42, 0, 0);
+      leftLeg.knee.rotation.set(0.65 + 0.12 * ease, 0, 0);
+
+      // Drive leg (Right) lifts off rubber and kicks high into the air!
+      rightLeg.hip.rotation.set(0.55 + 0.65 * ease, 0, 0.35 * ease);
+      rightLeg.knee.rotation.set(0.08 + 1.30 * ease, 0, 0);
+      rightLeg.foot.rotation.set(0.4 * ease, 0, 0);
+    }
+  };
+
+  const getBallSocketWorldPos = (targetVec: THREE.Vector3) => {
+    // Ensure all local transforms are updated to world matrix
+    group.updateMatrixWorld(true);
+    ballSocket.getWorldPosition(targetVec);
+    return targetVec;
+  };
+
+  // Initialize in realistic Set Stance
+  setPose('IDLE', 0, 0);
+
+  return {
+    group,
+    bodyRoot,
+    pelvis,
+    torso,
+    headGroup,
+    rightShoulder,
+    rightUpperArm,
+    rightElbow,
+    rightForearm,
+    rightHand,
+    ballSocket,
+    leftShoulder,
+    leftUpperArm,
+    leftElbow,
+    leftForearm,
+    gloveGroup,
+    leftHip: leftLeg.hip,
+    leftThigh: leftLeg.thigh,
+    leftKnee: leftLeg.knee,
+    leftShin: leftLeg.shin,
+    leftFoot: leftLeg.foot,
+    rightHip: rightLeg.hip,
+    rightThigh: rightLeg.thigh,
+    rightKnee: rightLeg.knee,
+    rightShin: rightLeg.shin,
+    rightFoot: rightLeg.foot,
+    setPose,
+    getBallSocketWorldPos,
+  };
 }
 
 /**
